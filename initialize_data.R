@@ -24,3 +24,5 @@ head(Users)
 Votes <- read.csv("travel_stackexchange_com/Votes.csv.gz")
 head(Votes)
 
+library(dplyr)
+library(data.table)

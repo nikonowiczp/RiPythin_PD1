@@ -36,3 +36,38 @@ query4base <- merge.data.frame(counts,query4base[,c('Title','Year', 'Count')], b
 query4base <- query4base[,c(3,1,2)]
 
 compare::compare(query4base , query4sqldf, allowAll = TRUE)
+
+
+
+
+#dplyr
+query4dplyr <- Votes %>%
+  filter(VoteTypeId == 2) %>%
+  mutate(Year =  substr(CreationDate,1,4)) %>%
+  select(PostId, Year) %>%
+  group_by(PostId, Year) %>%
+  summarize(Count = n()) %>%
+  #UpvotesPerYear
+  left_join(Posts[,c("Id","Title","PostTypeId")], by = c("PostId" = "Id")) %>%
+  filter(PostTypeId == 1) %>%
+  group_by(Year) %>%
+  filter(Count == max(Count)) %>%
+  select(Title = Title, Year = Year, Count = Count) %>%
+  arrange(Year)
+
+
+compare::compare(query4dplyr , query4sqldf, allowAll = TRUE)
+
+head(query4sqldf)
+
+
+#data.table
+library(data.table)
+query4datatable <- data.table(PostId = Votes$PostId, CreationDate = Votes$CreationDate, VotesTypeId = Votes$VoteTypeId)
+query4datatable <- query4datatable[,Year := substr(CreationDate,1,4)]
+query4datatable <- query4datatable[VotesTypeId == 2, .(Count = .N), by = list(PostId, Year)]
+query4datatable <- query4datatable[data.table(Id = Posts$Id, Title = Posts$Title, PostTypeId = Posts$PostTypeId), on = .(PostId = Id), nomatch = NULL]
+query4datatable <- query4datatable[PostTypeId == 1, .SD[which.max(Count)], by = Year]
+query4datatable <- query4datatable[,.(Title = Title, Year = Year, Count = Count)][with(query3datatable,order(Year)),]
+
+compare::compare(query4datatable , query4sqldf, allowAll = TRUE)

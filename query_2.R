@@ -25,3 +25,24 @@ query2base
 
 
 compare::compare(query2base , query2sqldf, allowAll = TRUE)
+
+library(dplyr)
+#dplyr
+query2dplyr <- Posts %>% 
+  select(OwnerUserId) %>%
+  left_join( Users[,c("Id","Location")], by = c("OwnerUserId" = "Id")) %>%
+  filter(Location != '') %>%
+  group_by(Location) %>%
+  summarize(Count = n()) %>%
+  top_n(10) %>%
+  arrange(desc(Count))
+
+compare::compare(query2dplyr , query2sqldf, allowAll = TRUE)
+
+#data.table
+query2datatable <- data.table(Id = Users$Id,
+                              Location = Users$Location)
+query2datatable <- query2datatable[ data.table(OwnerUserId = Posts$OwnerUserId), on = .(Id = OwnerUserId)]
+query2datatable <- query2datatable[Location != '',.(Count = .N), by = Location][with(query2datatable,order(-Count)),][1:10,]
+
+compare::compare(query2datatable , query2sqldf, allowAll = TRUE)

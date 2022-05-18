@@ -23,3 +23,23 @@ query1base
 
 
 compare::compare(query1base , query1sqldf, allowAll = TRUE)
+
+
+#dplyr
+
+query1dplyr <- Badges %>% 
+  group_by(Name) %>%
+  summarize(Number = n(), BestClass = min(Class)) %>%
+  top_n(Number,n = 10) %>%
+  arrange(desc(Number))
+
+compare::compare(query1dplyr , query1sqldf, allowAll = TRUE)
+
+
+#data.table
+
+query1datatable <- data.table(Name = Badges$Name, 
+                              Class = Badges$Class)
+query1datatable <- query1datatable[ ,.( Number =.N, BestClass = min(Class)), by = .(Name)][with(query1datatable,order(-Number)),][1:10,]
+
+compare::compare(query1datatable , query1sqldf, allowAll = TRUE)

@@ -25,11 +25,7 @@ LIMIT 10
 ')
 
             
-colnames(Users)
-head(
-  query3base
-)
-class(AnsCount)
+
 AnsCount <-Posts[Posts$PostTypeId == 2,c('ParentId'),drop = FALSE]
 AnsCount <- aggregate(AnsCount[, c(1)],
                         by = AnsCount[c('ParentId')],
@@ -51,3 +47,37 @@ query3base <- data.frame(
   AverageAnswersCount = query3base$AverageAnswersCount
 )
 compare::compare(query3base , query3sqldf, allowAll = TRUE)
+
+#dplyr
+query3dplyr <- Posts %>%
+  filter(PostTypeId == 2) %>%
+  select(ParentId) %>% 
+  group_by(ParentId) %>%
+  summarize(AnswersCount = n()) %>%
+  left_join(Posts[,c("Id", "OwnerUserId")], by = c("ParentId" = "Id")) %>%
+  rename(Id= ParentId) %>%
+  #here we have full post auth
+  group_by(OwnerUserId) %>%
+  summarize(AverageAnswersCount = mean(AnswersCount)) %>%
+  right_join(Users[,c("AccountId", "DisplayName", "Location")], by = c("OwnerUserId" = "AccountId")) %>%
+  rename(AccountId = OwnerUserId) %>%
+  top_n(AverageAnswersCount, n = 10) %>%
+  relocate(AverageAnswersCount, .after = Location) %>%
+  arrange(desc(AverageAnswersCount),AccountId)
+
+compare::compare(query3dplyr , query3sqldf, allowAll = TRUE)
+
+
+#data.table
+query3datatable <- data.table(ParentId = Posts$ParentId,
+                             PostTypeId = Posts$PostTypeId)
+query3datatable <- query3datatable[PostTypeId == 2,.(AnswersCount = .N) ,by = ParentId]
+query3datatable <- query3datatable[data.table(Id = Posts$Id, OwnerUserId = Posts$OwnerUserId), on = .(ParentId = Id),nomatch = NULL]
+query3datatable <- query3datatable[data.table(AccountId = Users$AccountId, DisplayName = Users$DisplayName, Location = Users$Location), on = .(OwnerUserId=AccountId), nomatch = NULL]
+query3datatable <- query3datatable[, .(DisplayName = DisplayName, Location = Location, AverageAnswersCount = mean(AnswersCount)) , by = OwnerUserId]
+query3datatable <- query3datatable[with(query3datatable,order(-AverageAnswersCount)),][1:10,]
+setnames(query3datatable, "OwnerUserId", "AccountId")
+
+compare::compare(query3datatable , query3sqldf, allowAll = TRUE)
+
+

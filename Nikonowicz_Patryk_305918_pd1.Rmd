@@ -1,0 +1,586 @@
+---
+title: "Nikonowicz_Patryk_305918_pd1"
+author: "Patryk Nikonowicz"
+date: '2022-05-13'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Wstęp
+
+Zadanie polegało na wykonaniu 5 zapytań SQL w sqldf, czystym R, dplr oraz data.frame. Zapytania wykonywane są na danych z serwisu [Travel Stack Exchange](https://travel.stackexchange.com/).
+
+### Przygotowanie danych
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+setwd("C:/Users/patry/Documents/Projekty/Semestr_6/R i Python/PD/PD1/Nikonowicz_Patryk_305918_pd1")
+
+if ( options()$stringsAsFactors )
+  options(stringsAsFactors=FALSE) # dla R w wersji < 4.0
+# ww. pliki znajdują się w katalogu travel_stackexchange_com
+Badges <- read.csv("travel_stackexchange_com/Badges.csv.gz")
+
+Comments <- read.csv("travel_stackexchange_com/Comments.csv.gz")
+
+PostLinks <- read.csv("travel_stackexchange_com/PostLinks.csv.gz")
+
+Posts <- read.csv("travel_stackexchange_com/Posts.csv.gz")
+
+Tags <- read.csv("travel_stackexchange_com/Tags.csv.gz")
+
+Users <- read.csv("travel_stackexchange_com/Users.csv.gz")
+
+Votes <- read.csv("travel_stackexchange_com/Votes.csv.gz")
+
+library(dplyr)
+library(data.table)
+
+```
+
+## Zapytania
+
+### Zapytanie 1
+
+    SELECT
+          Name,
+          COUNT(*) AS Number,
+          MIN(Class) AS BestClass
+          FROM Badges
+          GROUP BY Name
+          ORDER BY Number DESC
+          LIMIT 10
+
+Zapytanie to wybierze 10 najczęściej otrzymanych typów odznak w serwisie oraz najmniejszy numer klasy dla każdego z tych typów.
+
+#### Przygotowanie metod
+
+```{r}
+fquery1sqldf <- function (){
+  query1sqldf <- sqldf::sqldf('
+SELECT
+      Name,
+      COUNT(*) AS Number,
+      MIN(Class) AS BestClass
+      FROM Badges
+      GROUP BY Name
+      ORDER BY Number DESC
+      LIMIT 10
+')
+}
+fquery1base <- function (){
+  query1base <- aggregate(Badges[, c(5)],
+          by = Badges[c('Name')],
+          function(x) c(Number = length(x),
+                        BestClass = min(x, na.rm = TRUE) ))
+query1base <- cbind.data.frame(Name = query1base[, 1], query1base[, 2])
+query1base <- query1base[order(-query1base$Number),  ]
+query1base <- query1base[1:10,]
+}
+fquery1dplyr <- function(){
+  query1dplyr <- Badges %>% 
+  group_by(Name) %>%
+  summarize(Number = n(), BestClass = min(Class)) %>%
+  top_n(Number,n = 10) %>%
+  arrange(desc(Number))
+
+}
+fquery1datatable <- function(){
+  query1datatable <- data.table(Name = Badges$Name, 
+                              Class = Badges$Class)
+  query1datatable <- query1datatable[ ,.( Number =.N, BestClass = min(Class)), by = .(Name)][with(query1datatable,order(-Number)),][1:10,]
+
+}
+```
+
+#### Sprawdzenie poprawności wyników
+
+Jako podstawę sprawdzenia poprawności wyników będzie służyć wynik uzyskany za pomocą biblioteki sqldf.
+
+```{r, warning=FALSE, message=FALSE}
+microbenchmark::microbenchmark (
+  query1sqldf <- fquery1sqldf(),
+  query1base <- fquery1base(),
+  query1dplyr <- fquery1dplyr(),
+  query1datatable <- fquery1datatable()
+)
+compare::compare(query1base , query1sqldf, allowAll = TRUE)
+compare::compare(query1dplyr , query1sqldf, allowAll = TRUE)
+compare::compare(query1datatable , query1sqldf, allowAll = TRUE)
+
+
+```
+
+### Zapytanie 2
+
+    SELECT Location, COUNT(*) AS Count
+    FROM (
+      SELECT Posts.OwnerUserId, Users.Id, Users.Location
+      FROM Users
+      JOIN Posts ON Users.Id = Posts.OwnerUserId
+    )
+    WHERE Location NOT IN ('')
+    GROUP BY Location
+    ORDER BY Count DESC
+    LIMIT 10
+
+Zapytanie to posegreguje lokalizacje na podstawie ilości postów wstawionych przez użytkowników zarejestrowanych w tej lokalizacji. Po odrzuceniu niewpisanych lokalizacji wypisze 10 z największą ilością postów.
+
+#### Przygotowanie metod
+
+```{r}
+fquery2sqldf <- function (){
+  
+  query2sqldf <- sqldf::sqldf("
+SELECT Location, COUNT(*) AS Count
+FROM (
+  SELECT Posts.OwnerUserId, Users.Id, Users.Location
+  FROM Users
+  JOIN Posts ON Users.Id = Posts.OwnerUserId
+)
+WHERE Location NOT IN ('')
+GROUP BY Location
+ORDER BY Count DESC
+LIMIT 10
+")
+
+}
+
+fquery2base <- function (){
+mergeddf <- merge.data.frame(Users[,c(1,7)], Posts[,c(1,8)], by.x =1,by.y = 2)
+
+mergeddf <- mergeddf[mergeddf$Location!= '',]
+query2base <- aggregate(mergeddf[, c(2)],
+                        by = mergeddf[c('Location')],
+                        length)
+query2base <- query2base[order(-query2base$x),  ]
+query2base <- query2base[1:10,]
+rownames(query2base) <- 1:10
+colnames(query2base)[2] <- c("Count")
+query2base
+
+}
+
+fquery2dplyr <- function(){
+  
+  query2dplyr <- Posts %>% 
+  select(OwnerUserId) %>%
+  left_join( Users[,c("Id","Location")], by = c("OwnerUserId" = "Id")) %>%
+  filter(Location != '') %>%
+  group_by(Location) %>%
+  summarize(Count = n()) %>%
+  top_n(10) %>%
+  arrange(desc(Count))
+  
+}
+
+fquery2datatable <- function(){
+  
+query2datatable <- data.table(Id = Users$Id,
+                              Location = Users$Location)
+query2datatable <- query2datatable[ data.table(OwnerUserId = Posts$OwnerUserId), on = .(Id = OwnerUserId)]
+query2datatable <- query2datatable[Location != '',.(Count = .N), by = Location][with(query2datatable,order(-Count)),][1:10,]
+
+}
+```
+
+#### Sprawdzenie poprawności wyników
+
+Jako podstawę sprawdzenia poprawności wyników będzie służyć wynik uzyskany za pomocą biblioteki sqldf.
+
+```{r, warning=FALSE, message=FALSE}
+microbenchmark::microbenchmark (
+  query2sqldf <- fquery2sqldf(),
+  query2base <- fquery2base(),
+  query2dplyr <- fquery2dplyr(),
+  query2datatable <- fquery2datatable()
+)
+compare::compare(query2base , query2sqldf, allowAll = TRUE)
+compare::compare(query2dplyr , query2sqldf, allowAll = TRUE)
+compare::compare(query2datatable , query2sqldf, allowAll = TRUE)
+
+
+```
+
+### Zapytanie 3
+
+    SELECT
+      Users.AccountId,
+      Users.DisplayName,
+      Users.Location,
+      AVG(PostAuth.AnswersCount) as AverageAnswersCount
+    FROM
+    (
+      SELECT
+        AnsCount.AnswersCount,
+        Posts.Id,
+        Posts.OwnerUserId
+      FROM (
+            SELECT Posts.ParentId, COUNT(*) AS AnswersCount
+            FROM Posts
+            WHERE Posts.PostTypeId = 2
+            GROUP BY Posts.ParentId
+            ) AS AnsCount
+      JOIN Posts ON Posts.Id = AnsCount.ParentId
+      ) AS PostAuth
+    JOIN Users ON Users.AccountId=PostAuth.OwnerUserId
+    GROUP BY OwnerUserId
+    ORDER BY AverageAnswersCount DESC
+    LIMIT 10
+
+Zapytanie to wybierze 10 użytkowników z największa średnią ilością odpowiedzi na posty o id 2. Wyświetlone zostaną dane użytkownika - AcoountId, Wyświetlana nazwa oraz lokacja. \#### Przygotowanie metod
+
+```{r}
+fquery3sqldf <- function (){
+  
+query3sqldf <- sqldf::sqldf('
+SELECT
+  Users.AccountId,
+  Users.DisplayName,
+  Users.Location,
+  AVG(PostAuth.AnswersCount) as AverageAnswersCount
+FROM
+(
+  SELECT
+    AnsCount.AnswersCount,
+    Posts.Id,
+    Posts.OwnerUserId
+  FROM (
+        SELECT Posts.ParentId, COUNT(*) AS AnswersCount
+        FROM Posts
+        WHERE Posts.PostTypeId = 2
+        GROUP BY Posts.ParentId
+        ) AS AnsCount
+  JOIN Posts ON Posts.Id = AnsCount.ParentId
+  ) AS PostAuth
+JOIN Users ON Users.AccountId=PostAuth.OwnerUserId
+GROUP BY OwnerUserId
+ORDER BY AverageAnswersCount DESC
+LIMIT 10
+')
+
+}
+fquery3base <- function (){
+
+AnsCount <-Posts[Posts$PostTypeId == 2,c('ParentId'),drop = FALSE]
+AnsCount <- aggregate(AnsCount[, c(1)],
+                        by = AnsCount[c('ParentId')],
+                        length)
+colnames(AnsCount)[2] <- 'AnswersCount'
+mergedData <- merge.data.frame(AnsCount, Posts[,c('Id','OwnerUserId')], by.x =1, by.y = 1)
+mergedData <- merge.data.frame(mergedData, Users[,c('AccountId','DisplayName','Location')], by.x =3, by.y = 1)
+query3base <- aggregate(mergedData[, c('AnswersCount')],
+                        by = mergedData[c('OwnerUserId')],
+                        mean)
+colnames(query3base)[2] <- 'AverageAnswersCount'
+query3base <- merge.data.frame(mergedData,query3base,by.x =1, by.y = 1)
+query3base <- query3base[order(-query3base$AverageAnswersCount),  ]
+query3base <- query3base[1:10,]
+query3base <- data.frame(
+  AccountId = query3base$OwnerUserId,
+  DisplayName = query3base$DisplayName,
+  Location = query3base$Location,
+  AverageAnswersCount = query3base$AverageAnswersCount
+)
+
+}
+fquery3dplyr <- function(){
+  
+query3dplyr <- Posts %>%
+  filter(PostTypeId == 2) %>%
+  select(ParentId) %>% 
+  group_by(ParentId) %>%
+  summarize(AnswersCount = n()) %>%
+  left_join(Posts[,c("Id", "OwnerUserId")], by = c("ParentId" = "Id")) %>%
+  rename(Id= ParentId) %>%
+  #here we have full post auth
+  group_by(OwnerUserId) %>%
+  summarize(AverageAnswersCount = mean(AnswersCount)) %>%
+  right_join(Users[,c("AccountId", "DisplayName", "Location")], by = c("OwnerUserId" = "AccountId")) %>%
+  rename(AccountId = OwnerUserId) %>%
+  top_n(AverageAnswersCount, n = 10) %>%
+  relocate(AverageAnswersCount, .after = Location) %>%
+  arrange(desc(AverageAnswersCount),AccountId)
+
+  
+}
+fquery3datatable <- function(){
+  
+query3datatable <- data.table(ParentId = Posts$ParentId,
+                             PostTypeId = Posts$PostTypeId)
+query3datatable <- query3datatable[PostTypeId == 2,.(AnswersCount = .N) ,by = ParentId]
+query3datatable <- query3datatable[data.table(Id = Posts$Id, OwnerUserId = Posts$OwnerUserId), on = .(ParentId = Id),nomatch = NULL]
+query3datatable <- query3datatable[data.table(AccountId = Users$AccountId, DisplayName = Users$DisplayName, Location = Users$Location), on = .(OwnerUserId=AccountId), nomatch = NULL]
+query3datatable <- query3datatable[, .(DisplayName = DisplayName, Location = Location, AverageAnswersCount = mean(AnswersCount)) , by = OwnerUserId]
+query3datatable <- query3datatable[with(query3datatable,order(-AverageAnswersCount)),][1:10,]
+setnames(query3datatable, "OwnerUserId", "AccountId")
+  
+}
+```
+
+#### Sprawdzenie poprawności wyników
+
+Jako podstawę sprawdzenia poprawności wyników będzie służyć wynik uzyskany za pomocą biblioteki sqldf.
+
+```{r, warning=FALSE,message=FALSE}
+microbenchmark::microbenchmark (
+  query3sqldf <- fquery3sqldf(),
+  query3base <- fquery3base(),
+  query3dplyr <- fquery3dplyr(),
+  query3datatable <- fquery3datatable()
+)
+compare::compare(query3base , query3sqldf, allowAll = TRUE)
+compare::compare(query3dplyr , query3sqldf, allowAll = TRUE)
+compare::compare(query3datatable , query3sqldf, allowAll = TRUE)
+
+
+```
+
+### Zapytanie 4
+
+    SELECT
+      Posts.Title,
+      UpVotesPerYear.Year,
+      MAX(UpVotesPerYear.Count) AS Count
+    FROM (
+          SELECT
+            PostId,
+            COUNT(*) AS Count,
+            STRFTIME('%Y', Votes.CreationDate) AS Year
+          FROM Votes
+          WHERE VoteTypeId=2
+          GROUP BY PostId, Year
+          ) AS UpVotesPerYear
+    JOIN Posts ON Posts.Id=UpVotesPerYear.PostId
+    WHERE Posts.PostTypeId=1
+    GROUP BY Year
+    ORDER BY Year ASC
+
+Zapytanie to wybierze post, który dostał najwięcej głosów o id = 2 dla każdego roku. \#### Przygotowanie metod
+
+```{r}
+fquery4sqldf <- function (){
+
+query4sqldf <- sqldf::sqldf("
+SELECT
+  Posts.Title,
+  UpVotesPerYear.Year,
+  MAX(UpVotesPerYear.Count) AS Count
+FROM (
+      SELECT
+        PostId,
+        COUNT(*) AS Count,
+        STRFTIME('%Y', Votes.CreationDate) AS Year
+      FROM Votes
+      WHERE VoteTypeId=2
+      GROUP BY PostId, Year
+      ) AS UpVotesPerYear
+JOIN Posts ON Posts.Id=UpVotesPerYear.PostId
+WHERE Posts.PostTypeId=1
+GROUP BY Year
+ORDER BY Year ASC
+")
+  
+}
+fquery4base <- function (){
+
+YearData <- data.frame(
+  PostId = Votes[Votes$VoteTypeId==2,c('PostId')],
+  Year = substr(as.character(Votes[Votes$VoteTypeId==2,c('CreationDate')]), 1, 4)
+)
+UpVotesPerYear <- aggregate(YearData[, c('PostId')],
+                            by = YearData[c('PostId','Year')],
+                            length)
+colnames(UpVotesPerYear)[3] <- 'Count'
+
+query4base <- merge.data.frame(Posts[Posts$PostTypeId == 1,c('Id','Title')], UpVotesPerYear, by.x = 1, by.y = 1)
+counts <- aggregate(query4base[, c('Count')],
+                            by = query4base[c('Year')],
+                            max )
+colnames(counts)[2]='Count'
+query4base <- merge.data.frame(counts,query4base[,c('Title','Year', 'Count')], by =c('Year', 'Count'))
+query4base <- query4base[,c(3,1,2)]
+  
+}
+fquery4dplyr <- function(){
+  
+query4dplyr <- Votes %>%
+  filter(VoteTypeId == 2) %>%
+  mutate(Year =  substr(CreationDate,1,4)) %>%
+  select(PostId, Year) %>%
+  group_by(PostId, Year) %>%
+  summarize(Count = n()) %>%
+  #UpvotesPerYear
+  left_join(Posts[,c("Id","Title","PostTypeId")], by = c("PostId" = "Id")) %>%
+  filter(PostTypeId == 1) %>%
+  group_by(Year) %>%
+  filter(Count == max(Count)) %>%
+  select(Title = Title, Year = Year, Count = Count) %>%
+  arrange(Year)
+  
+}
+fquery4datatable <- function(){
+  
+query4datatable <- data.table(PostId = Votes$PostId, CreationDate = Votes$CreationDate, VotesTypeId = Votes$VoteTypeId)
+query4datatable <- query4datatable[,Year := substr(CreationDate,1,4)]
+query4datatable <- query4datatable[VotesTypeId == 2, .(Count = .N), by = list(PostId, Year)]
+query4datatable <- query4datatable[data.table(Id = Posts$Id, Title = Posts$Title, PostTypeId = Posts$PostTypeId), on = .(PostId = Id), nomatch = NULL]
+query4datatable <- query4datatable[PostTypeId == 1, .SD[which.max(Count)], by = Year]
+query4datatable <- query4datatable[,.(Title = Title, Year = Year, Count = Count)][with(query4datatable,order(Year)),]
+
+  
+}
+```
+
+#### Sprawdzenie poprawności wyników
+
+Jako podstawę sprawdzenia poprawności wyników będzie służyć wynik uzyskany za pomocą biblioteki sqldf.
+
+```{r, warning=FALSE,message=FALSE}
+microbenchmark::microbenchmark (
+  query4sqldf <- fquery4sqldf(),
+  query4base <- fquery4base(),
+  query4dplyr <- fquery4dplyr(),
+  query4datatable <- fquery4datatable()
+)
+compare::compare(query4base , query4sqldf, allowAll = TRUE)
+compare::compare(query4dplyr , query4sqldf, allowAll = TRUE)
+compare::compare(query4datatable , query4sqldf, allowAll = TRUE)
+
+
+```
+
+### Zapytanie 5
+
+    SELECT
+      Posts.Title,
+      VotesByAge2.OldVotes
+    FROM Posts
+    JOIN (
+          SELECT
+          PostId,
+          MAX(CASE WHEN VoteDate = 'new' THEN Total ELSE 0 END) NewVotes,
+          MAX(CASE WHEN VoteDate = 'old' THEN Total ELSE 0 END) OldVotes,
+          SUM(Total) AS Votes
+          FROM (
+            SELECT
+              PostId,
+              CASE STRFTIME('%Y', CreationDate)
+              WHEN '2021' THEN 'new'
+              WHEN '2020' THEN 'new'
+              ELSE 'old'
+              END VoteDate,
+              COUNT(*) AS Total
+            FROM Votes
+            WHERE VoteTypeId IN (1, 2, 5)
+            GROUP BY PostId, VoteDate
+          ) AS VotesByAge
+          GROUP BY VotesByAge.PostId
+          HAVING NewVotes=0
+    ) AS VotesByAge2 ON VotesByAge2.PostId=Posts.ID
+    WHERE Posts.PostTypeId=1
+    ORDER BY VotesByAge2.OldVotes DESC
+    LIMIT 10
+
+Zapytanie to wybierze 10 postów typu zapytanie które miały najwięcej zapytań przed poza latami 2021 i 2020, a które nie zastały zaakceptowane, dostały upvote'a albo zostały dodane do ulubionych w 2020 ani w 2021 roku. \#### Przygotowanie metod
+
+```{r}
+fquery5sqldf <- function (){
+
+query5sqldf <- sqldf::sqldf("
+SELECT
+  Posts.Title,
+  VotesByAge2.OldVotes
+FROM Posts
+JOIN (
+      SELECT
+      PostId,
+      MAX(CASE WHEN VoteDate = 'new' THEN Total ELSE 0 END) NewVotes,
+      MAX(CASE WHEN VoteDate = 'old' THEN Total ELSE 0 END) OldVotes,
+      SUM(Total) AS Votes
+      FROM (
+        SELECT
+          PostId,
+          CASE STRFTIME('%Y', CreationDate)
+          WHEN '2021' THEN 'new'
+          WHEN '2020' THEN 'new'
+          ELSE 'old'
+          END VoteDate,
+          COUNT(*) AS Total
+        FROM Votes
+        WHERE VoteTypeId IN (1, 2, 5)
+        GROUP BY PostId, VoteDate
+      ) AS VotesByAge
+      GROUP BY VotesByAge.PostId
+      HAVING NewVotes=0
+) AS VotesByAge2 ON VotesByAge2.PostId=Posts.ID
+WHERE Posts.PostTypeId=1
+ORDER BY VotesByAge2.OldVotes DESC
+LIMIT 10
+")
+  
+}
+fquery5base <- function (){
+  #nie udało mi się tego wykonać
+ query5base <- data.frame(c(0,0,0))
+}
+fquery5dplyr <- function(){
+ 
+query5dplyr <- Votes %>%
+  filter(VoteTypeId %in% c(1,2,5)) %>%
+  mutate(VoteDate = ifelse(substr(as.character(CreationDate),1,4) %in% c('2021', '2020'), "new", "old") ) %>%
+  group_by(PostId, VoteDate) %>%
+  summarize(Total = n()) %>%
+  group_by(PostId) %>%
+  summarize(NewVotes = max(ifelse(VoteDate=="new", Total, 0)), OldVotes= max(ifelse(VoteDate=="old", Total, 0)), Votes = sum(Total)) %>%
+  filter(NewVotes == 0) %>%
+  #We have VotesByAge2
+  right_join(Posts[,c("Title","PostTypeId","Id")], by = c("PostId" = "Id")) %>%
+  filter(PostTypeId == 1) %>%
+  select(Title = Title, OldVotes = OldVotes) %>%
+  top_n(OldVotes, n = 10) %>%
+  arrange(desc(OldVotes)) %>%
+  slice(1:10)
+   
+}
+fquery5datatable <- function(){
+  
+query5datatable <- data.table(PostId = Votes$PostId,
+                              CreationDate = Votes$CreationDate, 
+                              VoteTypeId = Votes$VoteTypeId)
+query5datatable <- query5datatable[VoteTypeId %in% c(1,2,5) , .(PostId = PostId , VoteDate = ifelse(substr(as.character(CreationDate),1,4) %in% c('2021', '2020'), "new", "old"))]
+query5datatable <- query5datatable[, .(Total = .N), by = list(PostId, VoteDate)]
+query5datatable <- query5datatable[, .(NewVotes = max(ifelse(VoteDate=="new", Total, as.integer(0))), OldVotes = max(ifelse(VoteDate=="old", Total,as.integer(0))  ), Votes = sum(Total)), by = PostId]
+query5datatable <- query5datatable[NewVotes == 0,]
+query5datatable <- query5datatable[data.table(Id = Posts$Id, Title = Posts$Title, PostTypeId = Posts$PostTypeId), on = .(PostId = Id), nomatch = NULL]
+query5datatable <- query5datatable[PostTypeId == 1, .(Title = Title, OldVotes = OldVotes)]
+query5datatable <- query5datatable[with(query5datatable,order(-OldVotes)),][1:10,]
+  
+}
+```
+
+#### Sprawdzenie poprawności wyników
+
+Jako podstawę sprawdzenia poprawności wyników będzie służyć wynik uzyskany za pomocą biblioteki sqldf.
+
+```{r, warning=FALSE,message=FALSE}
+microbenchmark::microbenchmark (
+  query5sqldf <- fquery5sqldf(),
+  query5base <- fquery5base(),
+  query5dplyr <- fquery5dplyr(),
+  query5datatable <- fquery5datatable()
+)
+compare::compare(query5base , query5sqldf, allowAll = TRUE)
+compare::compare(query5dplyr , query5sqldf, allowAll = TRUE)
+compare::compare(query5datatable , query5sqldf, allowAll = TRUE)
+
+
+```
+
+## Podsumowanie
+
+W prostszych zapytaniach biblioteka sqldf była wolniejsza od reszty, jednak w skomplikowanych dplyr był od niej wolniejszy. Data.table była najszybsza z nich.
+
+Dplyr był wygodny w użyciu od początku. Składnia była zrozumiała i intuicyjna. Data.table jednak zyskuje przewagę dzięki swojemu zyskowi czasowemu.
